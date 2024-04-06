@@ -24,7 +24,7 @@ git clone https://github.com/psyl4n3/symmetrical-octo-garbanzo.git
 ```
 2. **Make It Executable:** Run 
 ```
-`chmod +x passworless_debian.sh` to make sure the script can do its thing.
+chmod +x passworless_debian.sh` to make sure the script can do its thing.
 ```
 3. **Run It:** Execute the script as a super user:
 ```

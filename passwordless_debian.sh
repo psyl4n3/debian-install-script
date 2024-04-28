@@ -11,44 +11,55 @@ apt-get update -y
 apt-get upgrade -y
 apt-get autoremove -y
 
-# Prompt for changing the hostname
-read -p "Enter the new hostname: " new_hostname
-echo $new_hostname > /etc/hostname
-hostnamectl set-hostname $new_hostname
-
-# Update /etc/hosts to include the new hostname without disrupting localhost
-if ! grep -q "127.0.0.1 $new_hostname" /etc/hosts; then
-    echo "127.0.0.1 $new_hostname" >> /etc/hosts
-fi
-
-# Prompt for creating a new user
-read -p "Enter the username of the new user: " username
-adduser --gecos "" $username
-
-# Add new user to the sudoers file for passwordless sudo
-echo "$username ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$username
-
-# Modify /etc/ssh/sshd_config to secure SSH
-sed -i '/^PermitRootLogin/c\PermitRootLogin no' /etc/ssh/sshd_config
-sed -i '/^PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
-sed -i '/^PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
-
-# Ensure the SSH directory exists for the new user and has appropriate permissions
-su - $username -c "mkdir -p ~/.ssh"
-su - $username -c "chmod 700 ~/.ssh"
-
-# Copy the key file from the root user to the new user and set appropriate permissions
-cp ~/.ssh/authorized_keys /home/$username/.ssh/
-chown $username:$username /home/$username/.ssh/authorized_keys
-chmod 600 /home/$username/.ssh/authorized_keys
-
-# Restart SSH service
+# Prompt user for new hostname
+read -p "Enter new hostname: " new_hostname
+# Change hostname
+hostnamectl set-hostname "$new_hostname"
+echo "127.0.1.1 $new_hostname" >> /etc/hosts
+# Prompt user for new username and password
+read -p "Enter new username: " new_user
+read -s -p "Enter password for $new_user: " user_password
+echo
+read -s -p "Confirm password for $new_user: " user_password_confirm
+echo
+# Check if passwords match
+while [ "$user_password" != "$user_password_confirm" ]; do
+    echo "Passwords do not match. Please try again."
+    read -s -p "Enter password for $new_user: " user_password
+    echo
+    read -s -p "Confirm password for $new_user: " user_password_confirm
+    echo
+done
+# Create new user with sudo privileges
+useradd -m -s /bin/bash "$new_user"
+echo "$new_user:$user_password" | chpasswd
+usermod -aG sudo "$new_user"
+echo "$new_user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/"$new_user"
+# Copy SSH public key to new user's authorized_keys
+mkdir -p /home/"$new_user"/.ssh
+cp ~/.ssh/authorized_keys /home/"$new_user"/.ssh/
+chown -R "$new_user":"$new_user" /home/"$new_user"/.ssh
+chmod 700 /home/"$new_user"/.ssh
+chmod 600 /home/"$new_user"/.ssh/authorized_keys
+# Configure SSH
+sed -i '/^PermitRootLogin/d; $a\PermitRootLogin no' /etc/ssh/sshd_config
+sed -i '/^PasswordAuthentication/d; $a\PasswordAuthentication no' /etc/ssh/sshd_config
+sed -i '/^PubkeyAuthentication/d; $a\PubkeyAuthentication yes' /etc/ssh/sshd_config
+sed -i '/^AuthorizedKeysFile/d; $a\AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2' /etc/ssh/sshd_config
 systemctl restart sshd
-
-# Reboot the machine
-read -p "Setup is complete. Reboot now? (y/n): " reboot_choice
-if [ "$reboot_choice" = "y" ]; then
-    reboot
-else
-    echo "Reboot cancelled. Please reboot manually to complete setup."
+# Prompt user to install Docker
+read -p "Do you want to install Docker? (y/n): " install_docker
+if [[ "$install_docker" =~ ^[Yy]$ ]]; then
+    # Install Docker
+    apt-get update
+    apt-get install -y apt-transport-https ca-certificates curl gnupg
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io
+    # Install Docker Compose
+    curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+    # Add user to docker group
+    usermod -aG docker "$new_user"
 fi
